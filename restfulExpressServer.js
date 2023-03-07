@@ -22,15 +22,42 @@ server.use(bodyParser.json());
 
 // use DATABASE_HOST environmental variable if it exists (set by docker compose),
 // or default to localhost if no value is set (run outside docker)
-const DB_HOST = process.env.DATABASE_HOST || "localhost";
+// const DB_HOST = process.env.DATABASE_HOST || "localhost";
 
-const pool = new Pool({
-  user: "postgres",
-  host: DB_HOST,
-  database: "games",
-  password: "password",
+const POSTGRES_HOST = process.env.POSTGRES_HOST || "127.0.0.1";
+const POSTGRES_DB = process.env.POSTGRES_DB || "games";
+const POSTGRES_PASSWORD = process.env.POSTGRES_PASSWORD || "password";
+const POSTGRES_USER = process.env.POSTGRES_USER || "postgres";
+const DATABASE_URL = process.env.DATABASE_URL;
+
+const dbConfig = {
+  user: POSTGRES_USER,
+  host: POSTGRES_HOST,
+  database: POSTGRES_DB,
+  password: POSTGRES_PASSWORD,
   port: 5432,
-});
+};
+
+// const pool = new Pool({
+//   user: "postgres",
+//   host: DB_HOST,
+//   database: "games",
+//   password: "password",
+//   port: 5432,
+// });
+
+let pool = null;
+if (DATABASE_URL) {
+  pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: {
+      rejectUnauthorized: false,
+    },
+  });
+} else {
+  pool = new Pool(dbConfig);
+}
+
 /*
  ██████╗  ██████╗ ██╗   ██╗████████╗██╗███╗   ██╗ ██████╗ 
  ██╔══██╗██╔═══██╗██║   ██║╚══██╔══╝██║████╗  ██║██╔════╝ 
@@ -48,18 +75,18 @@ const pool = new Pool({
   ╚═════╝ ╚══════╝   ╚═╝   
 */
 //GET req for main page
-server.get("/", (req, res, next) => {
-  pool.query(
-    "SELECT * FROM videogames LEFT JOIN companies ON videogames.company_id = companies.id",
-    (err, data) => {
-      if (err) {
-        return next(err);
-      }
-      console.log(data.rows);
-      return res.send(data.rows);
-    }
-  );
-});
+// server.get("/", (req, res, next) => {
+//   pool.query(
+//     "SELECT * FROM videogames LEFT JOIN companies ON videogames.company_id = companies.id",
+//     (err, data) => {
+//       if (err) {
+//         return next(err);
+//       }
+//       console.log(data.rows);
+//       return res.send(data.rows);
+//     }
+//   );
+// });
 
 // GET request to /videogame - Read all the games
 server.get("/videogame", (req, res, next) => {
@@ -129,19 +156,15 @@ server.post("/company", (req, res, next) => {
   console.log("Request body: ${req.body}");
   // check request data - if everything exists and id is a number
   if (name) {
-    pool.query(
-      "INSERT INTO companies (name) VALUES ($1) RETURNING *",
-      [name],
-      (err, data) => {
-        const company = data.rows[0];
-        console.log("Added Company: ${name}");
-        if (company) {
-          return res.send(company);
-        } else {
-          return next(err);
-        }
+    pool.query("INSERT INTO companies (name) VALUES ($1) RETURNING *", [name], (err, data) => {
+      const company = data.rows[0];
+      console.log("Added Company: ${name}");
+      if (company) {
+        return res.send(company);
+      } else {
+        return next(err);
       }
-    );
+    });
   } else {
     return res.status(400).send("Unable to add company from request body");
   }
@@ -154,20 +177,16 @@ server.post("/videogame", (req, res, next) => {
   const year = req.body.year;
   //
   if (name && companyId && year) {
-    pool.query(
-      "INSERT INTO videogames (name, company_id, year) VALUES ($1, $2, $3) RETURNING *",
-      [name, companyId, year],
-      (err, data) => {
-        const game = data.rows[0];
-        if (game) {
-          console.log("Added Game:", req.body);
-          return res.send(game);
-        } else {
-          console.log("User tried adding:", req.body);
-          return next(err);
-        }
+    pool.query("INSERT INTO videogames (name, company_id, year) VALUES ($1, $2, $3) RETURNING *", [name, companyId, year], (err, data) => {
+      const game = data.rows[0];
+      if (game) {
+        console.log("Added Game:", req.body);
+        return res.send(game);
+      } else {
+        console.log("User tried adding:", req.body);
+        return next(err);
       }
-    );
+    });
   } else {
     return res.status(400).send("Unable to add game from request body");
   }
@@ -209,18 +228,14 @@ server.patch("/videogame/:id", (req, res, next) => {
       const updatedName = name || game.name;
       const updatedYear = year || game.year;
 
-      pool.query(
-        "UPDATE videogames SET name=$1, year=$2 WHERE id = $3 RETURNING *",
-        [updatedName, updatedYear, id],
-        (err, data) => {
-          if (err) {
-            return next(err);
-          }
-          const updatedGame = data.rows[0];
-          console.log("updated row:", updatedGame);
-          return res.send(updatedGame);
+      pool.query("UPDATE videogames SET name=$1, year=$2 WHERE id = $3 RETURNING *", [updatedName, updatedYear, id], (err, data) => {
+        if (err) {
+          return next(err);
         }
-      );
+        const updatedGame = data.rows[0];
+        console.log("updated row:", updatedGame);
+        return res.send(updatedGame);
+      });
     }
   });
 });
@@ -241,24 +256,20 @@ server.delete("/videogame/:id", (req, res, next) => {
     return res.status(400).send("No game found with that ID");
   }
 
-  pool.query(
-    "DELETE FROM videogames WHERE id = $1 RETURNING *",
-    [id],
-    (err, data) => {
-      if (err) {
-        return next(err);
-      }
-
-      const deletedGame = data.rows[0];
-      console.log(deletedGame);
-      if (deletedGame) {
-        // respond with deleted row
-        res.send(deletedGame);
-      } else {
-        res.status(404).send("No game found with that ID");
-      }
+  pool.query("DELETE FROM videogames WHERE id = $1 RETURNING *", [id], (err, data) => {
+    if (err) {
+      return next(err);
     }
-  );
+
+    const deletedGame = data.rows[0];
+    console.log(deletedGame);
+    if (deletedGame) {
+      // respond with deleted row
+      res.send(deletedGame);
+    } else {
+      res.status(404).send("No game found with that ID");
+    }
+  });
 });
 
 /*
